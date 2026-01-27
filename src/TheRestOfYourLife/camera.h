@@ -14,6 +14,11 @@
 #include "hittable.h"
 #include "pdf.h"
 #include "material.h"
+#include <thread>
+#include <mutex>
+#include <vector>
+#include <fstream>
+#include <atomic>
 
 
 class camera {
@@ -31,27 +36,101 @@ class camera {
 
     double defocus_angle = 0;  // Variation angle of rays through each pixel
     double focus_dist = 10;    // Distance from camera lookfrom point to plane of perfect focus
+    
+    int    num_threads = 0;    // Number of threads for rendering (0 = use hardware concurrency)
+    std::string output_file = "image.ppm";  // Output PPM file path
 
     void render(const hittable& world, const hittable& lights) {
         initialize();
+        
+        // 确定线程数
+        int threads_to_use = num_threads;
+        if (threads_to_use <= 0) {
+            threads_to_use = std::thread::hardware_concurrency();
+            if (threads_to_use == 0) threads_to_use = 4;  // 默认回退为 4 个线程
+        }
+        std::clog << "Using " << threads_to_use << " threads for rendering...\n";
+        std::clog << "Output file: " << output_file << "\n";
 
-        std::cout << "P3\n" << image_width << ' ' << image_height << "\n255\n";
-
-        for (int j = 0; j < image_height; j++) {
-            std::clog << "\rScanlines remaining: " << (image_height - j) << ' ' << std::flush;
-            for (int i = 0; i < image_width; i++) {
-                color pixel_color(0,0,0);
-                for (int s_j = 0; s_j < sqrt_spp; s_j++) {
-                    for (int s_i = 0; s_i < sqrt_spp; s_i++) {
-                        ray r = get_ray(i, j, s_i, s_j);
-                        pixel_color += ray_color(r, max_depth, world, lights);
+        // 创建用于存储像素数据的矩阵
+        std::vector<std::vector<color>> pixel_data(image_height, std::vector<color>(image_width, color(0,0,0)));
+        std::mutex clog_mutex;  // 用于保护日志输出
+        std::atomic<int> completed_rows(0);  // 记录已完成的行数
+        
+        // 创建线程并并行处理行
+        std::vector<std::thread> threads;
+        int rows_per_thread = (image_height + threads_to_use - 1) / threads_to_use;
+        
+        for (int t = 0; t < threads_to_use; t++) {
+            threads.emplace_back([this, &world, &lights, &pixel_data, &clog_mutex, &completed_rows, rows_per_thread, threads_to_use](int thread_id) {
+                int start_row = thread_id * rows_per_thread;
+                int end_row = std::min(start_row + rows_per_thread, image_height);
+                
+                for (int j = start_row; j < end_row; j++) {
+                    for (int i = 0; i < image_width; i++) {
+                        color pixel_color(0,0,0);
+                        for (int s_j = 0; s_j < sqrt_spp; s_j++) {
+                            for (int s_i = 0; s_i < sqrt_spp; s_i++) {
+                                ray r = get_ray(i, j, s_i, s_j);
+                                pixel_color += ray_color(r, max_depth, world, lights);
+                            }
+                        }
+                        pixel_data[j][i] = pixel_samples_scale * pixel_color;
                     }
+                    completed_rows++;
                 }
-                write_color(std::cout, pixel_samples_scale * pixel_color);
+            }, t);
+        }
+        
+        // 在主线程中显示进度条
+        std::thread progress_thread([this, &completed_rows]() {
+            while (completed_rows < image_height) {
+                int progress = completed_rows;
+                double percentage = (double)progress / image_height * 100.0;
+                int bar_width = 50;
+                int filled = (int)(percentage * bar_width / 100.0);
+                
+                std::clog << "\rRendering: [";
+                for (int i = 0; i < bar_width; i++) {
+                    if (i < filled) std::clog << "=";
+                    else if (i == filled) std::clog << ">";
+                    else std::clog << " ";
+                }
+                std::clog << "] " << (int)percentage << "% (" << progress << "/" << image_height << " rows)";
+                std::clog.flush();
+                
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+        });
+        
+        // 等待所有线程完成
+        for (auto& thread : threads) {
+            thread.join();
+        }
+        progress_thread.join();
+        
+        std::clog << "\r[==================================================] 100% (" << image_height << "/" << image_height << " rows)          \n";
+        std::clog << "Rendering complete. Writing to " << output_file << "...\n";
+        
+        // 打开输出文件
+        std::ofstream out(output_file);
+        if (!out.is_open()) {
+            std::cerr << "Error: Cannot open file " << output_file << " for writing.\n";
+            return;
+        }
+        
+        // 写入 PPM 头部
+        out << "P3\n" << image_width << ' ' << image_height << "\n255\n";
+        
+        // 输出像素数据到文件
+        for (int j = 0; j < image_height; j++) {
+            for (int i = 0; i < image_width; i++) {
+                write_color(out, pixel_data[j][i]);
             }
         }
-
-        std::clog << "\rDone.                 \n";
+        
+        out.close();
+        std::clog << "Done. Image saved to " << output_file << "\n";
     }
 
   private:

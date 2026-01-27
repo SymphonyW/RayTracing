@@ -1,4 +1,4 @@
 # Git Ignore Rules for raytracing.github.io
-
+.cache
 build/
 /*.ppm
