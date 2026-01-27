@@ -6,7 +6,7 @@
 
 cmake_minimum_required ( VERSION 3.1.0...4.0.0 )
 
-project ( RTWeekend LANGUAGES CXX )
+project ( RTWeekend LANGUAGES CXX CUDA )
 
 # Set to C++11
 set ( CMAKE_CXX_STANDARD          11 )
@@ -116,3 +116,24 @@ add_executable(Pi                src/TheRestOfYourLife/pi.cc                )
 add_executable(EstimateHalfway  src/TheRestOfYourLife/estimate_halfway.cc  )
 add_executable(SphereImportance src/TheRestOfYourLife/sphere_importance.cc )
 add_executable(SpherePlot       src/TheRestOfYourLife/sphere_plot.cc       )
+
+# GPU加速版本 (CUDA)
+if(CMAKE_CUDA_COMPILER)
+    set(CMAKE_CUDA_STANDARD 11)
+    set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler=/wd4819")
+    
+    add_executable(TheRestOfYourLife_CUDA 
+        src/TheRestOfYourLife/main_cuda.cu
+    )
+    
+    set_target_properties(TheRestOfYourLife_CUDA PROPERTIES
+        CUDA_SEPARABLE_COMPILATION OFF
+    )
+    
+    target_include_directories(TheRestOfYourLife_CUDA PRIVATE src/TheRestOfYourLife)
+    
+    message(STATUS "CUDA support enabled. Building TheRestOfYourLife_CUDA.")
+else()
+    message(STATUS "CUDA not found. GPU accelerated version will not be built.")
+endif()
