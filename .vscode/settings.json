@@ -1,0 +1,10 @@
+// 禁止 CMake Tools 接管 IntelliSense
+{
+    "C_Cpp.default.configurationProvider": "",
+    "cmake.configureOnOpen": false,
+    "C_Cpp.intelliSenseEngine": "default",
+    "files.associations": {
+        "*.cc": "cpp",
+        "*.cu": "cuda-cpp"
+    }
+}

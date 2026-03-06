@@ -301,8 +301,8 @@ int main() {
     // 图像分辨率（像素）
     // 数值越大 = 质量越好但渲染越慢
     // 推荐值：800x800（快速）, 1920x1080（平衡）, 3840x2160（高质量）
-    const int image_width = 1920;
-    const int image_height = 1080;
+    const int image_width = 3840;
+    const int image_height = 2160;
     
     // 每像素采样数（SPP）
     // 数值越大 = 噪点越少、图像越平滑但渲染越慢
@@ -318,6 +318,7 @@ int main() {
     // ========================================================================================
     
     std::cout << "=================================================\n";
+    std::cout << "============= current version:CUDA ==============\n";
     std::cout << "  GPU-Accelerated Ray Tracer (CUDA)\n";
     std::cout << "=================================================\n";
     std::cout << "Image Size:        " << image_width << " x " << image_height << "\n";
