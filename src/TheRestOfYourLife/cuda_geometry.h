@@ -55,6 +55,27 @@ struct Sphere {
 
         return true;
     }
+
+    // 球体重要性采样：PDF值
+    __device__ float pdf_value(const vec3& origin, const vec3& direction) const {
+        HitRecord rec;
+        if (!hit(ray(origin, direction), 0.001f, CUDART_INF_F, rec))
+            return 0.0f;
+
+        float dist_squared = (center - origin).length_squared();
+        float cos_theta_max = sqrtf(1.0f - radius * radius / dist_squared);
+        float solid_angle = 2.0f * CUDART_PI_F * (1.0f - cos_theta_max);
+
+        return 1.0f / solid_angle;
+    }
+
+    // 球体重要性采样：生成随机方向
+    __device__ vec3 random_direction(const vec3& origin, curandState* state) const {
+        vec3 direction = center - origin;
+        float distance_squared = direction.length_squared();
+        ONB uvw(direction);
+        return uvw.transform(random_to_sphere(radius, distance_squared, state));
+    }
 };
 
 // 四边形
@@ -64,6 +85,7 @@ struct Quad {
     vec3 normal;
     float D;
     vec3 w;
+    float area;
     int mat_idx;
 
     __host__ __device__ void initialize() {
@@ -71,6 +93,7 @@ struct Quad {
         normal = unit_vector(n);
         D = dot(normal, Q);
         w = n / dot(n, n);
+        area = n.length();
     }
 
     __device__ bool hit(const ray& r, float t_min, float t_max, HitRecord& rec) const {
@@ -99,6 +122,24 @@ struct Quad {
 
         return true;
     }
+
+    // 光源重要性采样：PDF值
+    __device__ float pdf_value(const vec3& origin, const vec3& direction) const {
+        HitRecord rec;
+        if (!hit(ray(origin, direction), 0.001f, CUDART_INF_F, rec))
+            return 0.0f;
+
+        float distance_squared = rec.t * rec.t * dot(direction, direction);
+        float cosine = fabsf(dot(direction, rec.normal) / direction.length());
+
+        return distance_squared / (cosine * area);
+    }
+
+    // 光源重要性采样：生成随机方向
+    __device__ vec3 random_direction(const vec3& origin, curandState* state) const {
+        vec3 p = Q + random_float(state) * u + random_float(state) * v;
+        return p - origin;
+    }
 };
 
 // 场景结构
@@ -110,12 +151,18 @@ struct Scene {
     Material* materials;
     int num_materials;
 
+    // 光源几何体（用于重要性采样，直接存储在结构体中）
+    static const int MAX_LIGHTS = 4;
+    Quad light_quads[MAX_LIGHTS];
+    int num_light_quads;
+    Sphere light_spheres[MAX_LIGHTS];
+    int num_light_spheres;
+
     __device__ bool hit(const ray& r, float t_min, float t_max, HitRecord& rec) const {
         HitRecord temp_rec;
         bool hit_anything = false;
         float closest_so_far = t_max;
 
-        // 检查所有球体
         for (int i = 0; i < num_spheres; i++) {
             if (spheres[i].hit(r, t_min, closest_so_far, temp_rec)) {
                 hit_anything = true;
@@ -124,7 +171,6 @@ struct Scene {
             }
         }
 
-        // 检查所有四边形
         for (int i = 0; i < num_quads; i++) {
             if (quads[i].hit(r, t_min, closest_so_far, temp_rec)) {
                 hit_anything = true;
@@ -134,6 +180,36 @@ struct Scene {
         }
 
         return hit_anything;
+    }
+
+    // 光源混合PDF值
+    __device__ float light_pdf_value(const vec3& origin, const vec3& direction) const {
+        int total_lights = num_light_quads + num_light_spheres;
+        if (total_lights == 0) return 0.0f;
+
+        float weight = 1.0f / total_lights;
+        float sum = 0.0f;
+
+        for (int i = 0; i < num_light_quads; i++)
+            sum += weight * light_quads[i].pdf_value(origin, direction);
+        for (int i = 0; i < num_light_spheres; i++)
+            sum += weight * light_spheres[i].pdf_value(origin, direction);
+
+        return sum;
+    }
+
+    // 随机选择一个光源并生成采样方向
+    __device__ vec3 light_random(const vec3& origin, curandState* state) const {
+        int total_lights = num_light_quads + num_light_spheres;
+        if (total_lights == 0) return vec3(0, 1, 0);
+
+        int choice = int(random_float(state) * total_lights);
+        if (choice >= total_lights) choice = total_lights - 1;
+
+        if (choice < num_light_quads)
+            return light_quads[choice].random_direction(origin, state);
+        else
+            return light_spheres[choice - num_light_quads].random_direction(origin, state);
     }
 };
 

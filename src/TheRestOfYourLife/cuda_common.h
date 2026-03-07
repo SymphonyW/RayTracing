@@ -149,6 +149,53 @@ __device__ inline vec3 refract(const vec3& uv, const vec3& n, float etai_over_et
     return r_out_perp + r_out_parallel;
 }
 
+// ONB (正交基底) - GPU版本
+struct ONB {
+    vec3 axis[3];
+
+    __device__ ONB() {}
+    __device__ ONB(const vec3& n) {
+        axis[2] = unit_vector(n);
+        vec3 a = (fabsf(axis[2].x()) > 0.9f) ? vec3(0, 1, 0) : vec3(1, 0, 0);
+        axis[1] = unit_vector(cross(axis[2], a));
+        axis[0] = cross(axis[2], axis[1]);
+    }
+
+    __device__ const vec3& u() const { return axis[0]; }
+    __device__ const vec3& v() const { return axis[1]; }
+    __device__ const vec3& w() const { return axis[2]; }
+
+    __device__ vec3 transform(const vec3& v) const {
+        return (v[0] * axis[0]) + (v[1] * axis[1]) + (v[2] * axis[2]);
+    }
+};
+
+// 余弦加权半球随机方向（局部坐标）
+__device__ inline vec3 random_cosine_direction(curandState* state) {
+    float r1 = random_float(state);
+    float r2 = random_float(state);
+
+    float phi = 2.0f * CUDART_PI_F * r1;
+    float x = cosf(phi) * sqrtf(r2);
+    float y = sinf(phi) * sqrtf(r2);
+    float z = sqrtf(1.0f - r2);
+
+    return vec3(x, y, z);
+}
+
+// 朝球体方向的重要性采样
+__device__ inline vec3 random_to_sphere(float radius, float distance_squared, curandState* state) {
+    float r1 = random_float(state);
+    float r2 = random_float(state);
+    float z = 1.0f + r2 * (sqrtf(1.0f - radius * radius / distance_squared) - 1.0f);
+
+    float phi = 2.0f * CUDART_PI_F * r1;
+    float x = cosf(phi) * sqrtf(1.0f - z * z);
+    float y = sinf(phi) * sqrtf(1.0f - z * z);
+
+    return vec3(x, y, z);
+}
+
 // 类型别名
 using point3 = vec3;
 using color = vec3;

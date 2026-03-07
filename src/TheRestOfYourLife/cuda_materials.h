@@ -11,6 +11,13 @@ enum MaterialType {
     DIFFUSE_LIGHT
 };
 
+// 散射记录
+struct ScatterRecord {
+    vec3 attenuation;
+    ray scattered;      // skip_pdf时用的散射光线
+    bool skip_pdf;      // true表示镜面材质，跳过PDF采样
+};
+
 // 材质结构
 struct Material {
     MaterialType type;
@@ -19,63 +26,68 @@ struct Material {
     float ir;           // 折射率
     vec3 emit;          // 发光颜色
 
-    __device__ vec3 emitted() const {
-        if (type == DIFFUSE_LIGHT) {
+    __device__ vec3 emitted(bool front_face) const {
+        if (type == DIFFUSE_LIGHT && front_face) {
             return emit;
         }
         return vec3(0, 0, 0);
     }
 
-    __device__ bool scatter(const ray& r_in, const vec3& p, const vec3& normal,
-                           vec3& attenuation, ray& scattered, curandState* state) const {
+    __device__ bool scatter(const ray& r_in, const vec3& p, const vec3& normal, bool front_face,
+                           ScatterRecord& srec, curandState* state) const {
         if (type == LAMBERTIAN) {
-            // Lambertian散射
-            vec3 scatter_direction = normal + random_unit_vector(state);
-            if (scatter_direction.near_zero())
-                scatter_direction = normal;
-            scattered = ray(p, scatter_direction, r_in.time());
-            attenuation = albedo;
+            srec.attenuation = albedo;
+            srec.skip_pdf = false;
+            // 散射方向由PDF采样决定，不在此处设置
             return true;
         }
         else if (type == METAL) {
-            // 金属反射
             vec3 reflected = reflect(unit_vector(r_in.direction()), normal);
-            scattered = ray(p, reflected + fuzz * random_in_unit_sphere(state), r_in.time());
-            attenuation = albedo;
-            return (dot(scattered.direction(), normal) > 0);
+            srec.scattered = ray(p, reflected + fuzz * random_in_unit_sphere(state), r_in.time());
+            srec.attenuation = albedo;
+            srec.skip_pdf = true;
+            return (dot(srec.scattered.direction(), normal) > 0);
         }
         else if (type == DIELECTRIC) {
-            // 电介质折射
-            attenuation = vec3(1.0f, 1.0f, 1.0f);
-            float refraction_ratio = dot(r_in.direction(), normal) < 0 ? (1.0f / ir) : ir;
+            srec.attenuation = vec3(1.0f, 1.0f, 1.0f);
+            srec.skip_pdf = true;
+            float refraction_ratio = front_face ? (1.0f / ir) : ir;
             vec3 unit_direction = unit_vector(r_in.direction());
-            
+
             float cos_theta = fminf(dot(-unit_direction, normal), 1.0f);
             float sin_theta = sqrtf(1.0f - cos_theta * cos_theta);
-            
+
             bool cannot_refract = refraction_ratio * sin_theta > 1.0f;
             vec3 direction;
-            
+
             // Schlick近似
             auto reflectance = [](float cosine, float ref_idx) -> float {
                 float r0 = (1 - ref_idx) / (1 + ref_idx);
                 r0 = r0 * r0;
                 return r0 + (1 - r0) * powf((1 - cosine), 5);
             };
-            
+
             if (cannot_refract || reflectance(cos_theta, refraction_ratio) > random_float(state))
                 direction = reflect(unit_direction, normal);
             else
                 direction = refract(unit_direction, normal, refraction_ratio);
-            
-            scattered = ray(p, direction, r_in.time());
+
+            srec.scattered = ray(p, direction, r_in.time());
             return true;
         }
         else if (type == DIFFUSE_LIGHT) {
-            // 光源不散射
             return false;
         }
         return false;
+    }
+
+    // 材质的散射PDF值（仅用于非skip_pdf材质）
+    __device__ float scattering_pdf(const vec3& normal, const ray& scattered) const {
+        if (type == LAMBERTIAN) {
+            float cos_theta = dot(normal, unit_vector(scattered.direction()));
+            return cos_theta < 0.0f ? 0.0f : cos_theta / CUDART_PI_F;
+        }
+        return 0.0f;
     }
 };
 

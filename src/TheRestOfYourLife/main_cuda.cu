@@ -1,6 +1,7 @@
 //==============================================================================================
 // GPU加速版本的光线追踪渲染器
-// 使用CUDA实现并行光线追踪
+// 基于CUDA并行计算，使用混合PDF重要性采样（光源采样 + 余弦加权半球采样）
+// 算法与CPU多线程版本对齐，通过GPU大规模并行加速实现高质量快速渲染
 //==============================================================================================
 
 #include "cuda_common.h"
@@ -34,38 +35,72 @@ __global__ void init_rand_state(curandState* rand_state, int max_x, int max_y) {
     curand_init(1984 + pixel_index, 0, 0, &rand_state[pixel_index]);
 }
 
-// 光线颜色计算（简化版，不使用重要性采样）
+// 光线颜色计算（使用重要性采样的完整版本）
 __device__ vec3 ray_color(const ray& r, const Scene& scene, curandState* local_rand_state, int max_depth) {
     ray cur_ray = r;
     vec3 cur_attenuation(1.0f, 1.0f, 1.0f);
-    vec3 accumulated_emit(0.0f, 0.0f, 0.0f);
+    vec3 accumulated_color(0.0f, 0.0f, 0.0f);
     
     for (int depth = 0; depth < max_depth; depth++) {
         HitRecord rec;
         
-        if (scene.hit(cur_ray, 0.001f, CUDART_INF_F, rec)) {
-            // 添加自发光
-            accumulated_emit = accumulated_emit + cur_attenuation * scene.materials[rec.mat_idx].emitted();
-            
-            ray scattered;
-            vec3 attenuation;
-            
-            if (scene.materials[rec.mat_idx].scatter(cur_ray, rec.p, rec.normal, 
-                                                     attenuation, scattered, local_rand_state)) {
-                cur_attenuation = cur_attenuation * attenuation;
-                cur_ray = scattered;
-            } else {
-                // 光源不散射，返回累积的发光
-                return accumulated_emit;
-            }
-        } else {
-            // 射线未击中任何物体，返回背景色（黑色）
-            return accumulated_emit;
+        if (!scene.hit(cur_ray, 0.001f, CUDART_INF_F, rec)) {
+            // 未击中任何物体，返回背景色（黑色）
+            break;
         }
+        
+        // 累加自发光
+        vec3 emission = scene.materials[rec.mat_idx].emitted(rec.front_face);
+        accumulated_color = accumulated_color + cur_attenuation * emission;
+        
+        // 尝试散射
+        ScatterRecord srec;
+        if (!scene.materials[rec.mat_idx].scatter(cur_ray, rec.p, rec.normal, rec.front_face,
+                                                  srec, local_rand_state)) {
+            // 不散射（光源），返回累积颜色
+            break;
+        }
+        
+        if (srec.skip_pdf) {
+            // 镜面材质（金属、电介质），直接使用散射方向，无需PDF修正
+            cur_attenuation = cur_attenuation * srec.attenuation;
+            cur_ray = srec.scattered;
+            continue;
+        }
+        
+        // === 重要性采样：混合PDF（光源采样 + 余弦采样） ===
+        ONB uvw(rec.normal);
+        ray scattered;
+        
+        if (random_float(local_rand_state) < 0.5f) {
+            // 50% 概率：朝光源方向采样
+            vec3 light_dir = scene.light_random(rec.p, local_rand_state);
+            scattered = ray(rec.p, light_dir, cur_ray.time());
+        } else {
+            // 50% 概率：余弦加权半球采样
+            vec3 cosine_dir = uvw.transform(random_cosine_direction(local_rand_state));
+            scattered = ray(rec.p, cosine_dir, cur_ray.time());
+        }
+        
+        // 计算混合PDF值
+        float light_pdf = scene.light_pdf_value(rec.p, scattered.direction());
+        float cosine_theta = dot(unit_vector(scattered.direction()), uvw.w());
+        float cosine_pdf = cosine_theta < 0.0f ? 0.0f : cosine_theta / CUDART_PI_F;
+        float pdf_value = 0.5f * light_pdf + 0.5f * cosine_pdf;
+        
+        if (pdf_value < 1e-10f) {
+            break;
+        }
+        
+        // 材质散射PDF
+        float s_pdf = scene.materials[rec.mat_idx].scattering_pdf(rec.normal, scattered);
+        
+        // 重要性采样修正：attenuation * scattering_pdf / mixture_pdf
+        cur_attenuation = cur_attenuation * srec.attenuation * (s_pdf / pdf_value);
+        cur_ray = scattered;
     }
     
-    // 超过最大深度，返回黑色
-    return vec3(0.0f, 0.0f, 0.0f);
+    return accumulated_color;
 }
 
 // 渲染内核
@@ -247,6 +282,26 @@ void create_cornell_box_scene(Scene& h_scene, Sphere*& d_spheres, Quad*& d_quads
     h_spheres[1].center = vec3(420, 70, 150);
     h_spheres[1].radius = 70;
     h_spheres[1].mat_idx = 5;
+
+    // 设置光源几何体（用于重要性采样）
+    // 光源四边形：与CPU版本一致，反转方向以确保法线朝下
+    Quad light_q;
+    light_q.Q = vec3(343, 554, 332);
+    light_q.u = vec3(-130, 0, 0);
+    light_q.v = vec3(0, 0, -105);
+    light_q.mat_idx = -1;
+    light_q.initialize();
+    h_scene.light_quads[0] = light_q;
+    h_scene.num_light_quads = 1;
+
+    // 玻璃球也作为重要性采样光源（与CPU版本一致）
+    Sphere light_s;
+    light_s.center = vec3(160, 90, 300);
+    light_s.radius = 90;
+    light_s.mat_idx = -1;
+    h_scene.light_spheres[0] = light_s;
+    h_scene.num_light_spheres = 1;
+
     CUDA_CHECK(cudaMalloc(&d_materials, num_materials * sizeof(Material)));
     CUDA_CHECK(cudaMalloc(&d_quads, num_quads * sizeof(Quad)));
     CUDA_CHECK(cudaMalloc(&d_spheres, num_spheres * sizeof(Sphere)));
@@ -307,13 +362,13 @@ int main() {
     // 每像素采样数（SPP）
     // 数值越大 = 噪点越少、图像越平滑但渲染越慢
     // 推荐值：10（预览）, 100（快速）, 1000（平衡）, 5000+（高质量）
-    // 注：由于未使用重要性采样，需要更多采样才能减少噪点
-    const int samples_per_pixel = 20000;
+    // 已使用重要性采样，收敛速度大幅提升
+    const int samples_per_pixel = 5000;
     
     // 光线最大反弹深度
     // 数值越大 = 光照越真实但渲染越慢
     // 推荐值：10（快速）, 50（平衡）, 100（高质量）
-    const int max_depth = 200;
+    const int max_depth = 100;
     
     // ========================================================================================
     

@@ -55,8 +55,8 @@ int main() {
     // 图像输出参数
     // ========================
     cam.aspect_ratio      = 1.0;    // 宽高比 (宽度/高度)
-    cam.image_width       = 1920;    // 图像宽度（像素），越大质量越高但渲染越慢
-    cam.samples_per_pixel = 1000;    // 每像素采样数，越多降噪效果越好
+    cam.image_width       = 500;    // 图像宽度（像素），越大质量越高但渲染越慢
+    cam.samples_per_pixel = 500;    // 每像素采样数，越多降噪效果越好
     cam.max_depth         = 100;     // 光线最大反弹深度，越大细节越丰富
     cam.background        = color(0,0,0);  // 背景色
 
