@@ -2,7 +2,9 @@
 
 CPU多线程版本：
 源码位于main.cc中
-编译运行指令：D:\raytracing> cmake --build build --target TheRestOfYourLife;.\build\theRestOfYourLife.exe
+编译运行指令：D:\raytracing> cmake --build build --target TheRestOfYourLife;.\build\Debug\TheRestOfYourLife.exe
+D:\raytracing> cmake --build build --target TheNextWeek;.\build\Debug\TheNextWeek.exe
+D:\raytracing> cmake --build build --target InOneWeekend;.\build\Debug\InOneWeekend.exe
 
 GPU版本
 源码位于main_cuda.cu中

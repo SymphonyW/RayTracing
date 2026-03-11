@@ -35,7 +35,7 @@ __global__ void init_rand_state(curandState* rand_state, int max_x, int max_y) {
     curand_init(1984 + pixel_index, 0, 0, &rand_state[pixel_index]);
 }
 
-// 光线颜色计算（使用重要性采样的完整版本）
+// 光线颜色计算（使用重要性采样）
 __device__ vec3 ray_color(const ray& r, const Scene& scene, curandState* local_rand_state, int max_depth) {
     ray cur_ray = r;
     vec3 cur_attenuation(1.0f, 1.0f, 1.0f);
@@ -366,9 +366,9 @@ int main() {
     const int samples_per_pixel = 5000;
     
     // 光线最大反弹深度
-    // 数值越大 = 光照越真实但渲染越慢
-    // 推荐值：10（快速）, 50（平衡）, 100（高质量）
-    const int max_depth = 100;
+    // 数值越大, 光照越真实但渲染越慢
+    // 10（快速）, 50（平衡）, 100（高质量）
+    const int max_depth = 500;
     
     // ========================================================================================
     
