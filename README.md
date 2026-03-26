@@ -1,14 +1,14 @@
-# 光线追踪渲染器
+# 光线追踪渲染器（增强版）
 
-基于 Peter Shirley 的《Ray Tracing in One Weekend》系列书籍实现的光线追踪渲染器，包含从基础到高级的光线追踪技术，并添加了 GPU 加速功能。
+本项目基于 [RayTracing/raytracing.github.io](https://github.com/RayTracing/raytracing.github.io.git) 仓库实现，在原有代码基础上新增了 **CPU多线程版本** 和 **GPU版本**，提供更高效的渲染性能。
 
 ## 项目结构
 
-项目分为三个主要阶段，每个阶段对应书籍的一个部分：
+项目继承了原仓库的三阶段结构，并进行了功能扩展：
 
-1. **InOneWeekend** - 基础光线追踪实现
-2. **TheNextWeek** - 扩展功能实现
-3. **TheRestOfYourLife** - 高级功能实现，包括 CUDA GPU 加速
+1. **InOneWeekend** - 基础光线追踪实现（支持CPU多线程）
+2. **TheNextWeek** - 扩展功能实现（支持CPU多线程）
+3. **TheRestOfYourLife** - 高级功能实现（支持CPU多线程和CUDA GPU加速）
 
 ## 核心功能
 
@@ -17,16 +17,19 @@
 - 支持多种材质：漫反射、金属、玻璃
 - 实现了相机系统和抗锯齿
 - 场景由球体组成，包括地面和随机分布的球体
+- **新增**：CPU多线程渲染支持
 
 ### 2. 扩展功能（TheNextWeek）
 - 添加了更多几何形状（如四边形）
 - 实现了 BVH（边界体积层次结构）加速
 - 添加了纹理和噪声功能
 - 实现了体积雾效果
+- **新增**：CPU多线程渲染支持
 
-### 3. 高级功能与 GPU 加速（TheRestOfYourLife）
+### 3. 高级功能与加速（TheRestOfYourLife）
 - 实现了重要性采样（混合 PDF 采样）
-- 添加了 CUDA GPU 加速版本
+- **新增**：CPU多线程渲染支持
+- **新增**：CUDA GPU 加速版本
 - 实现了 Cornell Box 场景
 - 支持更高质量的渲染效果
 
@@ -35,7 +38,7 @@
 ### 编译环境
 - CMake 3.1.0 或更高版本
 - C++11 兼容的编译器
-- CUDA 工具包（仅 GPU 版本需要）
+- CUDA 工具包 11.0 或更高版本（仅 GPU 版本需要）
 
 ### 支持平台
 - Windows
@@ -44,19 +47,20 @@
 
 ## 构建与运行
 
-### CPU 版本
+### CPU 多线程版本
 
 ```bash
-# 构建并运行 InOneWeekend
-cmake --build build --target InOneWeekend
+# 构建所有目标
+cmake -B build
+cmake --build build
+
+# 运行 InOneWeekend（CPU多线程版）
 ./build/Debug/InOneWeekend.exe
 
-# 构建并运行 TheNextWeek
-cmake --build build --target TheNextWeek
+# 运行 TheNextWeek（CPU多线程版）
 ./build/Debug/TheNextWeek.exe
 
-# 构建并运行 TheRestOfYourLife
-cmake --build build --target TheRestOfYourLife
+# 运行 TheRestOfYourLife（CPU多线程版）
 ./build/Debug/TheRestOfYourLife.exe
 ```
 
@@ -70,6 +74,9 @@ cmake --build build --target TheRestOfYourLife
 
 ## 渲染参数调整
 
+### 多线程设置
+- 可在各版本的 main.cc 文件中调整线程数：`std::thread::hardware_concurrency()`
+
 ### GPU 版本参数（main_cuda.cu）
 - `image_width` 和 `image_height` - 图像分辨率
 - `samples_per_pixel` - 每像素采样数（影响噪声和渲染速度）
@@ -80,18 +87,21 @@ cmake --build build --target TheRestOfYourLife
 
 ## 输出
 
-渲染结果将保存为 PPM 格式的图像文件，位于 `output` 目录中（GPU 版本）。
+渲染结果将保存为 PPM 格式的图像文件：
+- CPU 版本：直接输出到标准输出，可重定向到文件
+- GPU 版本：输出到 `output` 目录中
 
 ## 技术文档
 
 详细的技术文档位于 `doc` 目录中，包括：
 - 光线追踪原理
 - 代码结构分析
-- 性能优化技术
-- GPU 加速实现
+- 性能优化技术（包括CPU多线程和GPU加速）
+- GPU 加速实现细节
 
 ## 参考资料
 
+- [RayTracing/raytracing.github.io](https://github.com/RayTracing/raytracing.github.io.git)
 - Peter Shirley, "Ray Tracing in One Weekend"
 - Peter Shirley, "Ray Tracing: The Next Week"
 - Peter Shirley, "Ray Tracing: The Rest of Your Life"
